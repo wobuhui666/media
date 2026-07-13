@@ -253,6 +253,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
   private VideoSize decodedVideoSize;
   @Nullable private VideoSize reportedVideoSize;
   private int rendererPriority;
+  private final boolean enableDv7HevcFallback;
 
   private boolean tunneling;
   private int tunnelingAudioSessionId;
@@ -273,6 +274,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
     private MediaCodecAdapter.Factory codecAdapterFactory;
     private long allowedJoiningTimeMs;
     private boolean enableDecoderFallback;
+    private boolean enableDv7HevcFallback;
     @Nullable private Handler eventHandler;
     @Nullable private VideoRendererEventListener eventListener;
     private int maxDroppedFramesToNotify;
@@ -331,6 +333,19 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
     @CanIgnoreReturnValue
     public Builder setEnableDecoderFallback(boolean enableDecoderFallback) {
       this.enableDecoderFallback = enableDecoderFallback;
+      return this;
+    }
+
+    /**
+     * Sets whether Dolby Vision profile 7 may fall back to its HEVC base layer when a Dolby Vision
+     * decoder is unavailable.
+     *
+     * <p>Profile 7 is not unconditionally backward compatible, so this fallback is opt-in. The
+     * default is {@code false}.
+     */
+    @CanIgnoreReturnValue
+    public Builder setEnableDv7HevcFallback(boolean enableDv7HevcFallback) {
+      this.enableDv7HevcFallback = enableDv7HevcFallback;
       return this;
     }
 
@@ -661,6 +676,7 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
     tunnelingAudioSessionId = C.AUDIO_SESSION_ID_UNSET;
     reportedVideoSize = null;
     rendererPriority = C.PRIORITY_PLAYBACK;
+    enableDv7HevcFallback = builder.enableDv7HevcFallback;
     startPositionUs = C.TIME_UNSET;
     periodDurationUs = C.TIME_UNSET;
     av1SampleDependencyParser =
@@ -729,17 +745,21 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
   public static @Capabilities int supportsFormat(
       Context context, MediaCodecSelector mediaCodecSelector, Format format)
       throws DecoderQueryException {
-    return supportsFormatInternal(context, mediaCodecSelector, format);
+    return supportsFormatInternal(
+        context, mediaCodecSelector, format, /* enableDv7HevcFallback= */ false);
   }
 
   @Override
   protected @Capabilities int supportsFormat(MediaCodecSelector mediaCodecSelector, Format format)
       throws DecoderQueryException {
-    return supportsFormatInternal(context, mediaCodecSelector, format);
+    return supportsFormatInternal(context, mediaCodecSelector, format, enableDv7HevcFallback);
   }
 
   private static @Capabilities int supportsFormatInternal(
-      Context context, MediaCodecSelector mediaCodecSelector, Format format)
+      Context context,
+      MediaCodecSelector mediaCodecSelector,
+      Format format,
+      boolean enableDv7HevcFallback)
       throws DecoderQueryException {
     String mimeType = format.sampleMimeType;
     if (!MimeTypes.isVideo(mimeType)) {
@@ -754,7 +774,8 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
             mediaCodecSelector,
             format,
             requiresSecureDecryption,
-            /* requiresTunnelingDecoder= */ false);
+            /* requiresTunnelingDecoder= */ false,
+            enableDv7HevcFallback);
     if (requiresSecureDecryption && decoderInfos.isEmpty()) {
       // No secure decoders are available. Fall back to non-secure decoders.
       decoderInfos =
@@ -763,7 +784,8 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
               mediaCodecSelector,
               format,
               /* requiresSecureDecoder= */ false,
-              /* requiresTunnelingDecoder= */ false);
+              /* requiresTunnelingDecoder= */ false,
+              enableDv7HevcFallback);
     }
     if (decoderInfos.isEmpty()) {
       return RendererCapabilities.create(C.FORMAT_UNSUPPORTED_SUBTYPE);
@@ -774,13 +796,14 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
     // Check whether the first decoder supports the format. This is the preferred decoder for the
     // format's MIME type, according to the MediaCodecSelector.
     MediaCodecInfo decoderInfo = decoderInfos.get(0);
-    boolean isFormatSupported = decoderInfo.isFormatSupported(context, format);
+    boolean isFormatSupported =
+        isFormatSupported(decoderInfo, context, format, enableDv7HevcFallback);
     boolean isPreferredDecoder = true;
     if (!isFormatSupported) {
       // Check whether any of the other decoders support the format.
       for (int i = 1; i < decoderInfos.size(); i++) {
         MediaCodecInfo otherDecoderInfo = decoderInfos.get(i);
-        if (otherDecoderInfo.isFormatSupported(context, format)) {
+        if (isFormatSupported(otherDecoderInfo, context, format, enableDv7HevcFallback)) {
           decoderInfo = otherDecoderInfo;
           isFormatSupported = true;
           isPreferredDecoder = false;
@@ -817,13 +840,15 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
               mediaCodecSelector,
               format,
               requiresSecureDecryption,
-              /* requiresTunnelingDecoder= */ true);
+              /* requiresTunnelingDecoder= */ true,
+              enableDv7HevcFallback);
       if (!tunnelingDecoderInfos.isEmpty()) {
         MediaCodecInfo tunnelingDecoderInfo =
             MediaCodecUtil.getDecoderInfosSortedByFormatSupport(
                     context, tunnelingDecoderInfos, format)
                 .get(0);
-        if (tunnelingDecoderInfo.isFormatSupported(context, format)
+        if (isFormatSupported(
+                tunnelingDecoderInfo, context, format, enableDv7HevcFallback)
             && tunnelingDecoderInfo.isSeamlessAdaptationSupported(format)) {
           tunnelingSupport = TUNNELING_SUPPORTED;
         }
@@ -844,7 +869,13 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
       throws DecoderQueryException {
     return MediaCodecUtil.getDecoderInfosSortedByFormatSupport(
         context,
-        getDecoderInfos(context, mediaCodecSelector, format, requiresSecureDecoder, tunneling),
+        getDecoderInfos(
+            context,
+            mediaCodecSelector,
+            format,
+            requiresSecureDecoder,
+            tunneling,
+            enableDv7HevcFallback),
         format);
   }
 
@@ -872,14 +903,16 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
       MediaCodecSelector mediaCodecSelector,
       Format format,
       boolean requiresSecureDecoder,
-      boolean requiresTunnelingDecoder)
+      boolean requiresTunnelingDecoder,
+      boolean enableDv7HevcFallback)
       throws DecoderQueryException {
     if (format.sampleMimeType == null) {
       return ImmutableList.of();
     }
-    if (SDK_INT >= 26
-        && MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
-        && !Api26.doesDisplaySupportDolbyVision(context)) {
+    boolean displaySupportsDolbyVision =
+        SDK_INT < 26 || Api26.doesDisplaySupportDolbyVision(context);
+    if (MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)
+        && !displaySupportsDolbyVision) {
       List<MediaCodecInfo> alternativeDecoderInfos =
           MediaCodecUtil.getAlternativeDecoderInfos(
               mediaCodecSelector, format, requiresSecureDecoder, requiresTunnelingDecoder);
@@ -887,8 +920,54 @@ public class MediaCodecVideoRenderer extends MediaCodecRenderer
         return alternativeDecoderInfos;
       }
     }
-    return MediaCodecUtil.getDecoderInfosSoftMatch(
-        mediaCodecSelector, format, requiresSecureDecoder, requiresTunnelingDecoder);
+    List<MediaCodecInfo> decoderInfos =
+        MediaCodecUtil.getDecoderInfosSoftMatch(
+            mediaCodecSelector, format, requiresSecureDecoder, requiresTunnelingDecoder);
+    if (!enableDv7HevcFallback || !isDolbyVisionProfile7(format)) {
+      return decoderInfos;
+    }
+    List<MediaCodecInfo> hevcDecoderInfos =
+        mediaCodecSelector.getDecoderInfos(
+            MimeTypes.VIDEO_H265, requiresSecureDecoder, requiresTunnelingDecoder);
+    if (hevcDecoderInfos.isEmpty()) {
+      return decoderInfos;
+    }
+    if (!displaySupportsDolbyVision || decoderInfos.isEmpty()) {
+      return hevcDecoderInfos;
+    }
+    return ImmutableList.<MediaCodecInfo>builder()
+        .addAll(decoderInfos)
+        .addAll(hevcDecoderInfos)
+        .build();
+  }
+
+  private static boolean isDolbyVisionProfile7(Format format) {
+    if (!MimeTypes.VIDEO_DOLBY_VISION.equals(format.sampleMimeType)) {
+      return false;
+    }
+    @Nullable
+    Pair<Integer, Integer> codecProfileAndLevel =
+        CodecSpecificDataUtil.getCodecProfileAndLevel(format);
+    return codecProfileAndLevel != null
+        && codecProfileAndLevel.first == CodecProfileLevel.DolbyVisionProfileDvheDtb;
+  }
+
+  private static boolean isFormatSupported(
+      MediaCodecInfo decoderInfo,
+      Context context,
+      Format format,
+      boolean enableDv7HevcFallback) {
+    if (enableDv7HevcFallback
+        && isDolbyVisionProfile7(format)
+        && MimeTypes.VIDEO_H265.equals(decoderInfo.mimeType)) {
+      // The opt-in path deliberately feeds profile 7's HEVC base layer to a plain HEVC decoder.
+      // Check the decoder against that base-layer representation rather than against the DV MIME
+      // type/profile, which MediaCodecInfo correctly rejects by default.
+      Format hevcBaseLayerFormat =
+          format.buildUpon().setSampleMimeType(MimeTypes.VIDEO_H265).setCodecs(null).build();
+      return decoderInfo.isFormatSupported(context, hevcBaseLayerFormat);
+    }
+    return decoderInfo.isFormatSupported(context, format);
   }
 
   @RequiresApi(26)

@@ -73,6 +73,7 @@ import androidx.media3.common.Timeline.Period;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.VideoSize;
 import androidx.media3.common.ViewProvider;
+import androidx.media3.common.text.Cue;
 import androidx.media3.common.text.CueGroup;
 import androidx.media3.common.util.RepeatModeUtil;
 import androidx.media3.common.util.UnstableApi;
@@ -310,6 +311,8 @@ public class PlayerView extends FrameLayout implements AdViewProvider {
   @Nullable private final ImageView imageView;
   @Nullable private final ImageView artworkView;
   @Nullable private final SubtitleView subtitleView;
+  private ImmutableList<Cue> embeddedCues = ImmutableList.of();
+  private ImmutableList<Cue> externalCues = ImmutableList.of();
   @Nullable private final DanmakuView danmakuView;
   private final DanmakuController danmakuController;
   @Nullable private final View bufferingView;
@@ -688,6 +691,21 @@ public class PlayerView extends FrameLayout implements AdViewProvider {
     return player;
   }
 
+  /** Returns whether the optional debug overlay is visible in this source build. */
+  public boolean isDebugViewVisible() {
+    return false;
+  }
+
+  /** Toggles the optional debug overlay. */
+  public void toggleDebugView() {
+    // The standalone debug overlay isn't part of the source module.
+  }
+
+  /** Hides the optional debug overlay. */
+  public void hideDebugView() {
+    // The standalone debug overlay isn't part of the source module.
+  }
+
   /**
    * Sets the {@link Player} to use.
    *
@@ -720,9 +738,8 @@ public class PlayerView extends FrameLayout implements AdViewProvider {
       }
       clearImageOutput(oldPlayer);
     }
-    if (subtitleView != null) {
-      subtitleView.setCues(null);
-    }
+    embeddedCues = ImmutableList.of();
+    updateSubtitleCues();
     danmakuController.setPlayer(player);
     this.player = player;
     if (useController()) {
@@ -745,7 +762,8 @@ public class PlayerView extends FrameLayout implements AdViewProvider {
         }
       }
       if (subtitleView != null && player.isCommandAvailable(COMMAND_GET_TEXT)) {
-        subtitleView.setCues(player.getCurrentCues().cues);
+        embeddedCues = player.getCurrentCues().cues;
+        updateSubtitleCues();
       }
       player.addListener(componentListener);
       setImageOutput(player);
@@ -1491,6 +1509,24 @@ public class PlayerView extends FrameLayout implements AdViewProvider {
   }
 
   /**
+   * Sets transient cues produced outside the player's text renderer, such as on-device speech
+   * recognition. A non-empty external cue list intentionally takes precedence over embedded cues
+   * to avoid rendering two subtitle tracks on top of each other.
+   */
+  @UnstableApi
+  public void setExternalCues(@Nullable List<Cue> cues) {
+    externalCues = cues == null ? ImmutableList.of() : ImmutableList.copyOf(cues);
+    updateSubtitleCues();
+  }
+
+  private void updateSubtitleCues() {
+    if (subtitleView == null) {
+      return;
+    }
+    subtitleView.setCues(externalCues.isEmpty() ? embeddedCues : externalCues);
+  }
+
+  /**
    * Gets the {@link DanmakuView}.
    *
    * @return The {@link DanmakuView}, or {@code null} if the layout has been customized and the
@@ -1995,9 +2031,8 @@ public class PlayerView extends FrameLayout implements AdViewProvider {
 
     @Override
     public void onCues(CueGroup cueGroup) {
-      if (subtitleView != null) {
-        subtitleView.setCues(cueGroup.cues);
-      }
+      embeddedCues = cueGroup.cues;
+      updateSubtitleCues();
     }
 
     @Override

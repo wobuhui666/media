@@ -4858,6 +4858,58 @@ public class MediaCodecVideoRendererTest {
   }
 
   @Test
+  public void supportsFormat_profile7HevcFallback_isOptIn() throws Exception {
+    Format profile7Format =
+        new Format.Builder()
+            .setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION)
+            .setCodecs("dvhe.07.06")
+            .build();
+    MediaCodecSelector hevcOnlySelector =
+        (mimeType, requiresSecureDecoder, requiresTunnelingDecoder) -> {
+          if (!MimeTypes.VIDEO_H265.equals(mimeType)) {
+            return ImmutableList.of();
+          }
+          CodecCapabilities capabilities = new CodecCapabilities();
+          capabilities.profileLevels =
+              new CodecProfileLevel[] {
+                createCodecProfileLevel(HEVCProfileMain10, HEVCHighTierLevel51)
+              };
+          return ImmutableList.of(
+              MediaCodecInfo.newInstance(
+                  /* name= */ "h265-codec",
+                  /* mimeType= */ mimeType,
+                  /* codecMimeType= */ mimeType,
+                  capabilities,
+                  /* hardwareAccelerated= */ true,
+                  /* softwareOnly= */ false,
+                  /* vendor= */ false,
+                  /* forceDisableAdaptive= */ false,
+                  /* forceSecure= */ false));
+        };
+    MediaCodecVideoRenderer fallbackDisabledRenderer =
+        new MediaCodecVideoRenderer.Builder(ApplicationProvider.getApplicationContext())
+            .setMediaCodecSelector(hevcOnlySelector)
+            .build();
+    fallbackDisabledRenderer.init(/* index= */ 0, PlayerId.UNSET, Clock.DEFAULT);
+    MediaCodecVideoRenderer fallbackEnabledRenderer =
+        new MediaCodecVideoRenderer.Builder(ApplicationProvider.getApplicationContext())
+            .setMediaCodecSelector(hevcOnlySelector)
+            .setEnableDv7HevcFallback(true)
+            .build();
+    fallbackEnabledRenderer.init(/* index= */ 0, PlayerId.UNSET, Clock.DEFAULT);
+
+    @Capabilities
+    int fallbackDisabledCapabilities = fallbackDisabledRenderer.supportsFormat(profile7Format);
+    @Capabilities
+    int fallbackEnabledCapabilities = fallbackEnabledRenderer.supportsFormat(profile7Format);
+
+    assertThat(RendererCapabilities.getFormatSupport(fallbackDisabledCapabilities))
+        .isEqualTo(C.FORMAT_UNSUPPORTED_SUBTYPE);
+    assertThat(RendererCapabilities.getFormatSupport(fallbackEnabledCapabilities))
+        .isEqualTo(C.FORMAT_HANDLED);
+  }
+
+  @Test
   public void supportsFormat_withDolbyVision_setsDecoderSupportFlagsByDisplayDolbyVisionSupport()
       throws Exception {
     Format formatDvheDtr =

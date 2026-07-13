@@ -2968,6 +2968,11 @@ public class DefaultTrackSelector extends MappingTrackSelector
     return !parameters.constrainAudioChannelCountToDeviceCapabilities
         || (deviceIsTV != null && deviceIsTV)
         || (format.channelCount == Format.NO_VALUE || format.channelCount <= 2)
+        // The dedicated AV3A renderer performs its own 5.1.4/5.1 output capability check and
+        // channel mapping. Do not reject a declared 10-channel AV3A track on phones before that
+        // renderer can handle it. This exception is deliberately scoped to audio/av3a, so normal
+        // AAC/AC3/etc. selection keeps the platform's original channel-count constraints.
+        || MimeTypes.AUDIO_AV3A.equals(format.sampleMimeType)
         || (isDolbyAudio(format)
             && (SDK_INT < 32 || spatializer == null || !spatializer.isSpatializationSupported()))
         || (SDK_INT >= 32

@@ -119,6 +119,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
   private @ExtensionRendererMode int extensionRendererMode;
   private long allowedVideoJoiningTimeMs;
   private boolean enableDecoderFallback;
+  private boolean enableDv7HevcFallback;
   private MediaCodecSelector mediaCodecSelector;
   private boolean enableFloatOutput;
   private boolean enableAudioOutputPlaybackParameters;
@@ -155,6 +156,31 @@ public class DefaultRenderersFactory implements RenderersFactory {
   public final DefaultRenderersFactory setExtensionRendererMode(
       @ExtensionRendererMode int extensionRendererMode) {
     this.extensionRendererMode = extensionRendererMode;
+    return this;
+  }
+
+  /** Compatibility setter used by FongMi/TV's source build. */
+  @CanIgnoreReturnValue
+  public final DefaultRenderersFactory setFfmpegAudioPrefer(boolean ffmpegAudioPrefer) {
+    return this;
+  }
+
+  /** Compatibility setter used by FongMi/TV's source build. */
+  @CanIgnoreReturnValue
+  public final DefaultRenderersFactory setFfmpegVideoPrefer(boolean ffmpegVideoPrefer) {
+    return this;
+  }
+
+  /**
+   * Sets whether Dolby Vision profile 7 may fall back to its HEVC base layer when a Dolby Vision
+   * decoder is unavailable.
+   *
+   * <p>Profile 7 is not unconditionally backward compatible, so this fallback is opt-in. The
+   * default is {@code false}.
+   */
+  @CanIgnoreReturnValue
+  public final DefaultRenderersFactory setEnableDv7HevcFallback(boolean enableDv7HevcFallback) {
+    this.enableDv7HevcFallback = enableDv7HevcFallback;
     return this;
   }
 
@@ -496,6 +522,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
             .setMediaCodecSelector(mediaCodecSelector)
             .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
             .setEnableDecoderFallback(enableDecoderFallback)
+            .setEnableDv7HevcFallback(enableDv7HevcFallback)
             .setEventHandler(eventHandler)
             .setEventListener(eventListener)
             .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
@@ -965,6 +992,7 @@ public class DefaultRenderersFactory implements RenderersFactory {
               .setMediaCodecSelector(mediaCodecSelector)
               .setAllowedJoiningTimeMs(allowedVideoJoiningTimeMs)
               .setEnableDecoderFallback(enableDecoderFallback)
+              .setEnableDv7HevcFallback(enableDv7HevcFallback)
               .setEventHandler(eventHandler)
               .setEventListener(eventListener)
               .setMaxDroppedFramesToNotify(MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY)
