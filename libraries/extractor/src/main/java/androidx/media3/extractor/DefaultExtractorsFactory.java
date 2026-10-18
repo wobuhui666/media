@@ -129,8 +129,10 @@ public final class DefaultExtractorsFactory implements ExtractorsFactory {
         FileTypes.PS,
         FileTypes.OGG,
         FileTypes.TS,
-        FileTypes.MMT_TLV,
         FileTypes.MATROSKA,
+        // Matroska before MMT_TLV: the TLV sniffer is heuristic and can false-positive on
+        // arbitrary EBML/cluster payloads (e.g. DTS frame headers inside .mkv files).
+        FileTypes.MMT_TLV,
         FileTypes.ADTS,
         FileTypes.AC3,
         FileTypes.AC4,
